@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { upload } from '@vercel/blob/client';
 import HeroScreen from './components/HeroScreen.tsx';
 import QuoteForm from './components/QuoteForm.tsx';
 import SuccessScreen from './components/SuccessScreen.tsx';
@@ -24,23 +25,32 @@ export default function App() {
     setIsSubmitting(true);
 
     try {
-      // Build native FormData payload for files upload support
-      const payload = new FormData();
-      payload.append('name', formData.name);
-      payload.append('whatsapp', formData.whatsapp);
-      payload.append('material', formData.material);
-      payload.append('quantity', formData.quantity.toString());
-      payload.append('description', formData.description);
+      // 1. Upload all selected STL files directly to Vercel Blob Storage
+      const fileUrls: { name: string; url: string }[] = [];
 
-      // Append all selected STL files
-      formData.files.forEach((stlFile) => {
-        payload.append('files', stlFile.file);
-      });
+      for (const stlFile of formData.files) {
+        const blob = await upload(stlFile.file.name, stlFile.file, {
+          access: 'public',
+          handleUploadUrl: '/api/blob/upload',
+        });
+        fileUrls.push({ name: stlFile.file.name, url: blob.url });
+      }
+
+      // 2. Send the form data and the uploaded file URLs to the API
+      const payload = {
+        name: formData.name,
+        whatsapp: formData.whatsapp,
+        material: formData.material,
+        quantity: formData.quantity,
+        description: formData.description,
+        fileUrls: fileUrls,
+      };
 
       // Execute request
       const response = await fetch('/api/upload', {
         method: 'POST',
-        body: payload,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -83,7 +93,7 @@ export default function App() {
         styled with elegant rounded corners, subtle shadows, and crisp border boundaries.
       */}
       <div className="w-full md:max-w-4xl lg:max-w-5xl min-h-screen md:min-h-[720px] md:max-h-[860px] bg-white md:rounded-[32px] md:shadow-2xl md:shadow-slate-100/80 md:border border-slate-100 overflow-hidden relative flex flex-col">
-        
+
         {/* Dynamic Screen View Layer */}
         <div className="flex-1 overflow-hidden relative bg-white">
           <AnimatePresence mode="wait">

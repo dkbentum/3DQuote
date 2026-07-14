@@ -1,10 +1,10 @@
 import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
 import multer from 'multer';
 import dotenv from 'dotenv';
 import TelegramBot from 'node-telegram-bot-api';
+import { handleUpload } from '@vercel/blob/client';
 
 // Load environment variables
 dotenv.config();
@@ -31,19 +31,34 @@ if (botToken && botToken !== 'MY_TELEGRAM_BOT_TOKEN') {
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
-// Set up Multer for memory storage of STL uploads
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 1000 * 1024 * 1024, // 1000 MB per file
+// Route to generate client upload tokens for Vercel Blob
+app.post('/api/blob/upload', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const jsonResponse = await handleUpload({
+      body: req.body,
+      request: req,
+      onBeforeGenerateToken: async () => {
+        return {
+          allowedContentTypes: ['application/octet-stream', 'model/stl', 'text/plain', 'application/sla'],
+          maximumSizeInBytes: 1000 * 1024 * 1024, // 1GB limit on blob storage
+        };
+      },
+      onUploadCompleted: async ({ blob, tokenPayload }) => {
+        console.log('Blob upload completed', blob.url);
+      },
+    });
+
+    res.status(200).json(jsonResponse);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
   }
 });
 
-// API Route: Handle Quote & File Upload Submission
-app.post('/api/upload', upload.array('files'), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+// API Route: Handle Quote Submission (Receives JSON with file URLs)
+app.post('/api/upload', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { name, whatsapp, material, quantity, description } = req.body;
-    const files = req.files as Express.Multer.File[] || [];
+    const { name, whatsapp, material, quantity, description, fileUrls } = req.body;
+    const urls: { name: string, url: string }[] = fileUrls || [];
 
     if (!name || !whatsapp) {
       res.status(400).json({ error: 'Name and WhatsApp number are required.' });
@@ -62,13 +77,13 @@ app.post('/api/upload', upload.array('files'), async (req: Request, res: Respons
       ` <b>Quantity:</b> ${quantity || 1}\n` +
       ` <b>Description:</b> ${description || 'None provided'}\n\n` +
       ` <b>Submission Time:</b> ${timestamp}\n` +
-      ` <b>Files:</b> ${files.length} attached`;
+      ` <b>Files:</b> ${urls.length} attached`;
 
     // If Telegram secrets are not configured, simulate successful response for development environment
     if (!bot) {
       console.warn('⚠️ TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing or not configured. Simulating submission.');
       console.log('Simulated Telegram Message:\n', textMessage);
-      console.log(`Attached Files: ${files.map(f => f.originalname).join(', ')}`);
+      console.log(`Attached Files: \n${urls.map(u => `- ${u.name}: ${u.url}`).join('\n')}`);
 
       res.status(200).json({
         success: true,
@@ -85,18 +100,15 @@ app.post('/api/upload', upload.array('files'), async (req: Request, res: Respons
         parse_mode: 'HTML'
       });
 
-      // 2. Upload all documents to the Telegram bot
-      for (const file of files) {
+      // 2. Send all document URLs to the Telegram bot
+      for (const file of urls) {
         try {
-          await bot.sendDocument(chatId, file.buffer, {
-            caption: ` STL Model: ${file.originalname}\nFor customer: ${name}`
-          }, {
-            filename: file.originalname,
-            contentType: file.mimetype || 'application/octet-stream'
+          // Telegram supports sending files via URL
+          await bot.sendDocument(chatId, file.url, {
+            caption: ` STL Model: ${file.name}\nFor customer: ${name}`
           });
         } catch (err) {
-          console.error(`Error uploading file ${file.originalname} to Telegram:`, err);
-          // We continue to send other files even if one fails
+          console.error(`Error sending file URL ${file.url} to Telegram:`, err);
         }
       }
     }
@@ -116,12 +128,14 @@ if (process.env.NODE_ENV === 'production') {
   });
 } else {
   // In development mode, mount the Vite development middleware
-  createViteServer({
-    server: { middlewareMode: true },
-    appType: 'spa',
-  }).then((vite) => {
-    app.use(vite.middlewares);
-  });
+  import('vite').then(({ createServer: createViteServer }) => {
+    createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    }).then((vite) => {
+      app.use(vite.middlewares);
+    });
+  }).catch(err => console.error("Failed to load Vite:", err));
 }
 
 // Only listen locally, Vercel needs the exported app
