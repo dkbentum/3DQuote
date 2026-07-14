@@ -39,7 +39,6 @@ app.post('/api/blob/upload', async (req: Request, res: Response): Promise<void> 
       request: req,
       onBeforeGenerateToken: async () => {
         return {
-          allowedContentTypes: ['application/octet-stream', 'model/stl', 'text/plain', 'application/sla'],
           maximumSizeInBytes: 1000 * 1024 * 1024, // 1GB limit on blob storage
         };
       },
@@ -50,6 +49,7 @@ app.post('/api/blob/upload', async (req: Request, res: Response): Promise<void> 
 
     res.status(200).json(jsonResponse);
   } catch (error: any) {
+    console.error('Blob Token Generation Error:', error.message, error);
     res.status(400).json({ error: error.message });
   }
 });
