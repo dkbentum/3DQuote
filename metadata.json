@@ -1,0 +1,6 @@
+{
+  "name": "Instant 3D",
+  "description": "Premium mobile-first 3D printing quotation request MVP. Upload your STL models and receive direct quotations via Telegram and WhatsApp.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,12 @@
+Hello!
+
+If you want to add your company logo to the application, please do the following:
+
+1. Drag and drop your image file into this "public" folder.
+2. Rename the uploaded image file to "logo.png" (all lowercase).
+3. The application is already configured to automatically load "/logo.png" and replace the default "Instant 3D" vector fallback logo with your image!
+
+If your logo has a different name or file extension (like .svg, .jpeg, .webp), you can upload it here and let me know, and I will instantly update the code to point to your uploaded file.
+
+Best,
+Your Coding Assistant
