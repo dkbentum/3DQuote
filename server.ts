@@ -16,118 +16,119 @@ try {
   resolvedDirname = process.cwd();
 }
 
-async function startServer() {
-  const app = express();
-  const port = process.env.PORT || 3000;
+const app = express();
+const port = process.env.PORT || 3000;
 
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
+const botToken = process.env.TELEGRAM_BOT_TOKEN;
+const chatId = process.env.TELEGRAM_CHAT_ID;
 
-  let bot: TelegramBot | null = null;
-  if (botToken && botToken !== 'MY_TELEGRAM_BOT_TOKEN') {
-    bot = new TelegramBot(botToken);
+let bot: TelegramBot | null = null;
+if (botToken && botToken !== 'MY_TELEGRAM_BOT_TOKEN') {
+  bot = new TelegramBot(botToken);
+}
+
+// Use JSON and URL-encoded parsers with large limits
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
+
+// Set up Multer for memory storage of STL uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 1000 * 1024 * 1024, // 1000 MB per file
   }
+});
 
-  // Use JSON and URL-encoded parsers with large limits
-  app.use(express.json({ limit: '100mb' }));
-  app.use(express.urlencoded({ limit: '100mb', extended: true }));
+// API Route: Handle Quote & File Upload Submission
+app.post('/api/upload', upload.array('files'), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { name, whatsapp, material, quantity, description } = req.body;
+    const files = req.files as Express.Multer.File[] || [];
 
-  // Set up Multer for memory storage of STL uploads
-  // Limit files to 1000MB as requested, though memory limits may apply depending on the platform
-  const upload = multer({
-    storage: multer.memoryStorage(),
-    limits: {
-      fileSize: 1000 * 1024 * 1024, // 1000 MB per file
+    if (!name || !whatsapp) {
+      res.status(400).json({ error: 'Name and WhatsApp number are required.' });
+      return;
     }
-  });
 
-  // API Route: Handle Quote & File Upload Submission
-  app.post('/api/upload', upload.array('files'), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    try {
-      const { name, whatsapp, material, quantity, description } = req.body;
-      const files = req.files as Express.Multer.File[] || [];
+    const orderId = `TD-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+    const timestamp = new Date().toLocaleString('en-GH', { timeZone: 'Africa/Accra' });
 
-      if (!name || !whatsapp) {
-        res.status(400).json({ error: 'Name and WhatsApp number are required.' });
-        return;
-      }
+    // Create formatting for Telegram message
+    const textMessage = `# <b>NEW 3D PRINT REQUEST</b>\n\n` +
+      ` <b>Order ID:</b> ${orderId}\n` +
+      ` <b>Customer:</b> ${name}\n` +
+      ` <b>WhatsApp:</b> <a href="https://wa.me/${whatsapp.replace(/[^0-9]/g, '')}">${whatsapp}</a>\n` +
+      ` <b>Material:</b> ${material || 'Not specified'}\n` +
+      ` <b>Quantity:</b> ${quantity || 1}\n` +
+      ` <b>Description:</b> ${description || 'None provided'}\n\n` +
+      ` <b>Submission Time:</b> ${timestamp}\n` +
+      ` <b>Files:</b> ${files.length} attached`;
 
-      const orderId = `TD-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
-      const timestamp = new Date().toLocaleString('en-GH', { timeZone: 'Africa/Accra' });
+    // If Telegram secrets are not configured, simulate successful response for development environment
+    if (!bot) {
+      console.warn('⚠️ TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing or not configured. Simulating submission.');
+      console.log('Simulated Telegram Message:\n', textMessage);
+      console.log(`Attached Files: ${files.map(f => f.originalname).join(', ')}`);
 
-      // Create formatting for Telegram message
-      const textMessage = `# <b>NEW 3D PRINT REQUEST</b>\n\n` +
-        ` <b>Order ID:</b> ${orderId}\n` +
-        ` <b>Customer:</b> ${name}\n` +
-        ` <b>WhatsApp:</b> <a href="https://wa.me/${whatsapp.replace(/[^0-9]/g, '')}">${whatsapp}</a>\n` +
-        ` <b>Material:</b> ${material || 'Not specified'}\n` +
-        ` <b>Quantity:</b> ${quantity || 1}\n` +
-        ` <b>Description:</b> ${description || 'None provided'}\n\n` +
-        ` <b>Submission Time:</b> ${timestamp}\n` +
-        ` <b>Files:</b> ${files.length} attached`;
+      res.status(200).json({
+        success: true,
+        simulated: true,
+        orderId: orderId,
+        message: 'Quotation request simulated successfully! Set up TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in environment secrets to send to your actual bot.'
+      });
+      return;
+    }
 
-      // If Telegram secrets are not configured, simulate successful response for development environment
-      if (!bot) {
-        console.warn('⚠️ TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing or not configured. Simulating submission.');
-        console.log('Simulated Telegram Message:\n', textMessage);
-        console.log(`Attached Files: ${files.map(f => f.originalname).join(', ')}`);
+    // 1. Send the text details message to Telegram bot
+    if (chatId) {
+      await bot.sendMessage(chatId, textMessage, {
+        parse_mode: 'HTML'
+      });
 
-        res.status(200).json({
-          success: true,
-          simulated: true,
-          orderId: orderId,
-          message: 'Quotation request simulated successfully! Set up TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in environment secrets to send to your actual bot.'
-        });
-        return;
-      }
-
-      // 1. Send the text details message to Telegram bot
-      if (chatId) {
-        await bot.sendMessage(chatId, textMessage, {
-          parse_mode: 'HTML'
-        });
-
-        // 2. Upload all documents to the Telegram bot
-        for (const file of files) {
-          try {
-            await bot.sendDocument(chatId, file.buffer, {
-              caption: ` STL Model: ${file.originalname}\nFor customer: ${name}`
-            }, {
-              filename: file.originalname,
-              contentType: file.mimetype || 'application/octet-stream'
-            });
-          } catch (err) {
-            console.error(`Error uploading file ${file.originalname} to Telegram:`, err);
-            // We continue to send other files even if one fails
-          }
+      // 2. Upload all documents to the Telegram bot
+      for (const file of files) {
+        try {
+          await bot.sendDocument(chatId, file.buffer, {
+            caption: ` STL Model: ${file.originalname}\nFor customer: ${name}`
+          }, {
+            filename: file.originalname,
+            contentType: file.mimetype || 'application/octet-stream'
+          });
+        } catch (err) {
+          console.error(`Error uploading file ${file.originalname} to Telegram:`, err);
+          // We continue to send other files even if one fails
         }
       }
-
-      res.status(200).json({ success: true, orderId: orderId });
-    } catch (error: any) {
-      console.error('Error handling upload:', error);
-      res.status(500).json({ error: error?.message || 'An unexpected error occurred during submission.' });
     }
-  });
 
-  // Serve Frontend
-  if (process.env.NODE_ENV === 'production') {
-    app.use(express.static(path.resolve(resolvedDirname, 'dist')));
-    app.get('*', (req: Request, res: Response) => {
-      res.sendFile(path.resolve(resolvedDirname, 'dist/index.html'));
-    });
-  } else {
-    // In development mode, mount the Vite development middleware
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
+    res.status(200).json({ success: true, orderId: orderId });
+  } catch (error: any) {
+    console.error('Error handling upload:', error);
+    res.status(500).json({ error: error?.message || 'An unexpected error occurred during submission.' });
   }
+});
 
+// Serve Frontend
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.resolve(resolvedDirname, 'dist')));
+  app.get('*', (req: Request, res: Response) => {
+    res.sendFile(path.resolve(resolvedDirname, 'dist/index.html'));
+  });
+} else {
+  // In development mode, mount the Vite development middleware
+  createViteServer({
+    server: { middlewareMode: true },
+    appType: 'spa',
+  }).then((vite) => {
+    app.use(vite.middlewares);
+  });
+}
+
+// Only listen locally, Vercel needs the exported app
+if (process.env.NODE_ENV !== 'production') {
   app.listen(port, () => {
     console.log(` Instant 3D server running on port ${port} (env: ${process.env.NODE_ENV || 'development'})`);
   });
 }
 
-startServer();
+export default app;
