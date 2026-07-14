@@ -9,12 +9,11 @@ import TelegramBot from 'node-telegram-bot-api';
 // Load environment variables
 dotenv.config();
 
-// Standard ESM / CommonJS path resolution fallback
 let resolvedDirname = '';
 try {
   resolvedDirname = __dirname;
 } catch (e) {
-  resolvedDirname = path.dirname(fileURLToPath(import.meta.url));
+  resolvedDirname = process.cwd();
 }
 
 async function startServer() {
